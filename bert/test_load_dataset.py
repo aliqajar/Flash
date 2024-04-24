@@ -13,7 +13,6 @@
 
 # from transformers import whoami
 
-# user = whoami(token="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")
 
 
 
