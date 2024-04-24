@@ -1,0 +1,35 @@
+Channels:
+ - conda-forge
+ - defaults
+ - nvidia
+ - huggingface
+ - pytorch
+Platform: win-64
+Collecting package metadata (repodata.json): ...working... done
+Solving environment: ...working... done
+
+## Package Plan ##
+
+  environment location: C:\Users\aliqa\miniconda3\envs\transformers_env
+
+  added / updated specs:
+    - packaging
+
+
+The following NEW packages will be INSTALLED:
+
+  huggingface_hub    conda-forge/noarch::huggingface_hub-0.22.0-pyhd8ed1ab_0 
+  packaging          conda-forge/noarch::packaging-24.0-pyhd8ed1ab_0 
+
+The following packages will be UPDATED:
+
+  tokenizers                          0.10.3-py39h8c9392a_1 --> 0.15.2-py39hca44cb7_0 
+  transformers                                   2.1.1-py_0 --> 4.39.1-pyhd8ed1ab_0 
+
+
+Proceed ([y]/n)? 
+
+Downloading and Extracting Packages: ...working... done
+Preparing transaction: ...working... done
+Verifying transaction: ...working... done
+Executing transaction: ...working... done
