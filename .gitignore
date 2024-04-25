@@ -1,0 +1,18 @@
+# Ignore .tar files
+*.tar
+
+# Byte-compiled / optimized files
+__pycache__/
+*.pyc
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Environment directory
+venv/
+.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/

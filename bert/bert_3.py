@@ -1,6 +1,3 @@
-
-import os
-import glob
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -133,26 +130,20 @@ def initialize_weights(module):
         init.constant_(module.bias, 0)
 
 
-def save_checkpoint(state, filename="checkpoint.pth.tar"):
-    torch.save(state, filename)
-
-def load_latest_checkpoint(directory='.', filename_pattern='checkpoint_epoch_*.pth.tar'):
-    # List all files matching the checkpoint pattern
-    list_of_files = glob.glob(os.path.join(directory, filename_pattern))
-    if not list_of_files:
-        return None
-    # Find the latest file
-    latest_file = max(list_of_files, key=os.path.getctime)
-    print(f"Loading checkpoint: {latest_file}")
-    checkpoint = torch.load(latest_file)
-    return checkpoint
-
-def preprocess_function(examples):
-    texts = [text[:max_length-1] + "[SEP]" for text in examples["text"]]
-    return tokenizer(texts, padding="max_length", truncation=True, max_length=max_length, return_tensor="pt")
 
 
-# Run
+# Parameters
+# vocab_size = 30522
+# hidden_size = 768
+# num_hidden_layers = 12
+# num_attention_heads = 12
+# intermediate_size = 3072
+# max_position_embeddings = 512
+# max_length = 128
+# batch_size = 32
+# learning_rate = 5e-5
+# num_epochs = 3
+
 
 vocab_size = 30522
 hidden_size = 100
@@ -166,21 +157,35 @@ learning_rate = 5e-5
 num_epochs = 100    
 
 
-load_from_checkpoint = True
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
-# load dataset and tokenizer
+# load dataset
 dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
+
 tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+# tokenizer = BertTokenizer(
+#     vocab_file=None, 
+#     do_lower_case=True, 
+#     do_basic_tokenize=True, 
+#     never_split=None, 
+#     unk_token="[UNK]", 
+#     sep_token="[SEP]", 
+#     pad_token="[PAD]", 
+#     cls_token="[CLS]", 
+#     mask_token="[MASK]")
+
+
+def preprocess_function(examples):
+    texts = [text[:max_length-1] + "[SEP]" for text in examples["text"]]
+    return tokenizer(texts, padding="max_length", truncation=True, max_length=max_length, return_tensor="pt")
+
+
 encoded_dataset = dataset.map(preprocess_function, batched=True)
 encoded_dataset.set_format(type="torch", columns=['input_ids', 'attention_mask', 'token_type_ids'])
 
-# create dataloader
 train_dataloader = DataLoader(encoded_dataset, batch_size=batch_size, shuffle=True)
 
-# initialize model and optimizer
 base_bert_model = BertModel(
     vocab_size, 
     hidden_size, 
@@ -191,26 +196,17 @@ base_bert_model = BertModel(
 
 model = BertForNextTokenPrediction(base_bert_model, vocab_size).to(device)
 model.apply(initialize_weights)
+
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-best_val_loss = float('inf')
+print("before train")
+model.train()
+print("after train")
 
-# Optional checkpoint loading
-if load_from_checkpoint:
-    checkpoint = load_latest_checkpoint()
-    if checkpoint:
-        model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        start_epoch = checkpoint['epoch']
-        best_val_loss = checkpoint['best_val_loss']
-    else:
-        print("No checkpoint found, starting from scratch.")
-        start_epoch = 0
-        
+print_frequency = 1
 
-# Training loop
-for epoch in range(start_epoch, num_epochs):
-    model.train()
+for epoch in range(num_epochs):
+
     total_loss = 0.0
 
     for i, batch in enumerate(train_dataloader):
@@ -231,15 +227,30 @@ for epoch in range(start_epoch, num_epochs):
 
         total_loss += loss.item()
 
+
     avg_loss = total_loss / len(train_dataloader)
     print(f"Epoch {epoch+1}, Avg Loss: {avg_loss:.2f}")
 
-    # Save checkpoint at the end of each epoch or on improvement
-    if (epoch + 1) % 5 == 0 or avg_loss < best_val_loss:
-        best_val_loss = min(avg_loss, best_val_loss)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_val_loss': best_val_loss,
-            'optimizer': optimizer.state_dict(),
-        }, filename=f'checkpoint_epoch_{epoch+1}.pth.tar')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
