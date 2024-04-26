@@ -1,4 +1,3 @@
-
 import os
 import glob
 import torch
@@ -10,6 +9,30 @@ from datasets import load_dataset
 import math
 import torch.nn.init as init
 
+
+# Parameters
+vocab_size = 30522
+hidden_size = 768
+num_hidden_layers = 12
+num_attention_heads = 12
+intermediate_size = 3072
+max_position_embeddings = 512
+max_length = 128
+batch_size = 32
+learning_rate = 5e-5
+num_epochs = 1000
+
+# params
+# vocab_size = 30522
+# hidden_size = 100
+# num_hidden_layers = 4
+# num_attention_heads = 4
+# intermediate_size = 200
+# max_position_embeddings = 128
+# max_length = 32
+# batch_size = 32
+# learning_rate = 5e-5
+# num_epochs = 100    
 
 
 class BertModel(nn.Module):
@@ -119,127 +142,134 @@ class BertForNextTokenPrediction(nn.Module):
         return prediction_scores
     
 
+# methods
 def initialize_weights(module):
-
     if isinstance(module, nn.Linear):
         init.xavier_uniform_(module.weight)
         if module.bias is not None:
             init.zeros_(module.bias)
-
     elif isinstance(module, nn.Embedding):
         init.normal_(module.weight, mean=0, std=0.1)
     elif isinstance(module, nn.LayerNorm):
         init.constant_(module.weight, 1)
         init.constant_(module.bias, 0)
 
-
 def save_checkpoint(state, filename="checkpoint.pth.tar"):
-    torch.save(state, filename)
+    epoch = state['epoch']
+    formatted_filename = f"{filename.split('.')[0]}_train_{epoch}.pth.tar"
+    torch.save(state, os.path.join('.', formatted_filename))
 
-def load_latest_checkpoint(directory='.', filename_pattern='checkpoint_epoch_*.pth.tar'):
-    # List all files matching the checkpoint pattern
-    list_of_files = glob.glob(os.path.join(directory, filename_pattern))
+def load_latest_checkpoint(directory='.'):
+    pattern = 'checkpoint_train_*.pth.tar'
+    list_of_files = glob.glob(os.path.join(directory, pattern))
     if not list_of_files:
         return None
-    # Find the latest file
     latest_file = max(list_of_files, key=os.path.getctime)
-    print(f"Loading checkpoint: {latest_file}")
     checkpoint = torch.load(latest_file)
     return checkpoint
 
+
 def preprocess_function(examples):
+    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     texts = [text[:max_length-1] + "[SEP]" for text in examples["text"]]
-    return tokenizer(texts, padding="max_length", truncation=True, max_length=max_length, return_tensor="pt")
+    return tokenizer(texts, padding="max_length", truncation=True, max_length=max_length, return_tensors="pt")
 
 
-# Run
 
-vocab_size = 30522
-hidden_size = 100
-num_hidden_layers = 4
-num_attention_heads = 4
-intermediate_size = 200
-max_position_embeddings = 128
-max_length = 32
-batch_size = 32
-learning_rate = 5e-5
-num_epochs = 100    
+def main():
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
+
+    # load dataset and tokenizer
+    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
+    encoded_dataset = dataset.map(preprocess_function, batched=True)
+    encoded_dataset.set_format(type="torch", columns=['input_ids', 'attention_mask', 'token_type_ids'])
+    train_dataloader = DataLoader(encoded_dataset, batch_size=batch_size, shuffle=True)
+
+    val_dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="validation")
+    val_encoded_dataset = val_dataset.map(preprocess_function, batched=True)
+    val_encoded_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask'])
+    val_dataloader = DataLoader(val_encoded_dataset, batch_size=32, shuffle=False)        
+
+    base_bert_model = BertModel(vocab_size, hidden_size, num_hidden_layers, num_attention_heads, intermediate_size, max_position_embeddings).to(device)
+
+    model = BertForNextTokenPrediction(base_bert_model, vocab_size).to(device)
+    model.apply(initialize_weights)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 
-load_from_checkpoint = True
+    load_from_checkpoint = True
+    start_epoch = 0
+    best_val_loss = float('inf')
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
+    # Optional checkpoint loading
+    if load_from_checkpoint:
+        checkpoint = load_latest_checkpoint()
+        if checkpoint:
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            start_epoch = checkpoint.get('epoch', 0)
+            best_val_loss = checkpoint.get('best_val_loss', float('inf'))
+            print("Training checkpoint loaded successfully.")
+        else:
+            print("No training checkpoint found, starting from scratch.")
 
-# load dataset and tokenizer
-dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
-tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-encoded_dataset = dataset.map(preprocess_function, batched=True)
-encoded_dataset.set_format(type="torch", columns=['input_ids', 'attention_mask', 'token_type_ids'])
 
-# create dataloader
-train_dataloader = DataLoader(encoded_dataset, batch_size=batch_size, shuffle=True)
+    # Training loop
+    for epoch in range(start_epoch, num_epochs):
 
-# initialize model and optimizer
-base_bert_model = BertModel(
-    vocab_size, 
-    hidden_size, 
-    num_hidden_layers, 
-    num_attention_heads, 
-    intermediate_size, 
-    max_position_embeddings)
+        model.train()
+        total_loss = 0.0
+        for i, batch in enumerate(train_dataloader):
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            input_ids, labels = input_ids[:, :-1], input_ids[:, 1:]
+            attention_mask = attention_mask[:, :-1]
 
-model = BertForNextTokenPrediction(base_bert_model, vocab_size).to(device)
-model.apply(initialize_weights)
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+            outputs = model(input_ids, attention_mask)
+            loss_fn = nn.CrossEntropyLoss()
+            loss = loss_fn(outputs.reshape(-1, vocab_size), labels.reshape(-1))
 
-best_val_loss = float('inf')
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-# Optional checkpoint loading
-if load_from_checkpoint:
-    checkpoint = load_latest_checkpoint()
-    if checkpoint:
-        model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        start_epoch = checkpoint['epoch']
-        best_val_loss = checkpoint['best_val_loss']
-    else:
-        print("No checkpoint found, starting from scratch.")
-        start_epoch = 0
-        
+            total_loss += loss.item()
 
-# Training loop
-for epoch in range(start_epoch, num_epochs):
-    model.train()
-    total_loss = 0.0
 
-    for i, batch in enumerate(train_dataloader):
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
+        model.eval()
+        val_total_loss = 0
+        val_total_items = 0
 
-        input_ids, labels = input_ids[:, :-1], input_ids[:, 1:]
-        attention_mask = attention_mask[:, :-1]
+        with torch.no_grad():
+            for batch in val_dataloader:
+                val_input_ids = batch['input_ids'].to(device)
+                val_attention_mask = batch['attention_mask'].to(device)
+                val_input_ids, val_labels = val_input_ids[:, :-1], val_input_ids[:, 1:]
+                val_attention_mask = val_attention_mask[:, :-1]
 
-        outputs = model(input_ids, attention_mask)
+                val_outputs = model(val_input_ids, val_attention_mask)
+                val_loss_fn = nn.CrossEntropyLoss()
+                val_loss = val_loss_fn(val_outputs.reshape(-1, val_outputs.size(-1)), val_labels.reshape(-1))
 
-        loss_fn = nn.CrossEntropyLoss()
-        loss = loss_fn(outputs.reshape(-1, vocab_size), labels.reshape(-1))
+            val_total_loss += val_loss.item() * val_input_ids.size(0)
+            val_total_items += val_input_ids.size(0)            
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        train_avg_loss = total_loss / len(train_dataloader)
+        val_avg_loss = val_total_loss / val_total_items
+        print(f"Epoch {epoch+1}, Training Avg Loss: {train_avg_loss:.2f}, Evaluation Ave Loss: {val_avg_loss:.2f}")
 
-        total_loss += loss.item()
+        if (epoch + 1) % 5 == 0 or train_avg_loss < best_val_loss:
+            best_val_loss = min(train_avg_loss, best_val_loss)
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'train_loss': loss,
+                'val_loss': val_loss,
+            })
 
-    avg_loss = total_loss / len(train_dataloader)
-    print(f"Epoch {epoch+1}, Avg Loss: {avg_loss:.2f}")
 
-    # Save checkpoint at the end of each epoch or on improvement
-    if (epoch + 1) % 5 == 0 or avg_loss < best_val_loss:
-        best_val_loss = min(avg_loss, best_val_loss)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_val_loss': best_val_loss,
-            'optimizer': optimizer.state_dict(),
-        }, filename=f'checkpoint_epoch_{epoch+1}.pth.tar')
+if __name__ == "__main__":
+    main()
