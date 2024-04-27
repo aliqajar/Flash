@@ -1,4 +1,4 @@
-from bert_replica import BertTokenizer, BertModel, BertForNextTokenPrediction
+from my_bert_replica import BertTokenizer, BertModel, BertForNextTokenPrediction
 from datasets import load_dataset
 import torch
 from torch.utils.data import DataLoader

@@ -4,11 +4,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from transformers import BertTokenizer
+from transformers import BertTokenizer, BertModel
 from datasets import load_dataset
 import math
 import torch.nn.init as init
 
+checkpoint_name = "cp_bert"
+load_from_checkpoint = False
+checkpoint_frequency = 5
+use_pretrained_weights = True
 
 # Parameters
 vocab_size = 30522
@@ -20,6 +24,7 @@ max_position_embeddings = 512
 max_length = 128
 batch_size = 32
 learning_rate = 5e-5
+weight_decay = 1e-2
 num_epochs = 1000
 
 # params
@@ -30,25 +35,32 @@ num_epochs = 1000
 # intermediate_size = 200
 # max_position_embeddings = 128
 # max_length = 32
-# batch_size = 32
-# learning_rate = 5e-5
+# batch_size = 256
+# learning_rate = 1e-4
+# weight_decay = 1e-2
 # num_epochs = 100    
 
 
-class BertModel(nn.Module):
+class MyBertModel(nn.Module):
 
-    def __init__(self, vocab_size, hidden_size, num_hidden_layers, num_attention_heads, intermediate_size, max_position_embeddings):
+    def __init__(
+            self, 
+            vocab_size, 
+            hidden_size, 
+            num_hidden_layers, 
+            num_attention_heads, 
+            intermediate_size,
+            max_position_embeddings):
 
         super().__init__()
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(vocab_size, hidden_size)
         self.position_embedding = nn.Embedding(max_position_embeddings, hidden_size)
         self.layers = nn.ModuleList([
-            BertLayer(hidden_size, num_attention_heads, intermediate_size)
+            MyBertLayer(hidden_size, num_attention_heads, intermediate_size)
             for _ in range(num_hidden_layers)
         ])
 
-    
     def forward(self, input_ids, attention_mask):
         seq_length = input_ids.size(1)
         position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
@@ -58,14 +70,22 @@ class BertModel(nn.Module):
             embeddings = layer(embeddings, attention_mask)
         return embeddings
     
+    def load_pretrained_weights(self, pretrained_model):
+        self_state_dict = self.state_dict()
+        for key, value in pretrained_model.items():
+            if key in self_state_dict and self_state_dict[key].shape == value.shape:
+                self_state_dict[key] = value
+        self.load_state_dict(self_state_dict, strict=False)
 
-class BertLayer(nn.Module):
+    
+
+class MyBertLayer(nn.Module):
 
     def __init__(self, hidden_size, num_attention_heads, intermediate_size):
 
         super().__init__()
 
-        self.attention = BertAttention(hidden_size, num_attention_heads)
+        self.attention = MyBertAttention(hidden_size, num_attention_heads)
         self.feed_forward = nn.Sequential(
             nn.Linear(hidden_size, intermediate_size),
             nn.GELU(),
@@ -84,7 +104,7 @@ class BertLayer(nn.Module):
         return layernorm_output
     
 
-class BertAttention(nn.Module):
+class MyBertAttention(nn.Module):
 
     def __init__(self, hidden_size, num_attention_heads):
         super().__init__()
@@ -128,7 +148,7 @@ class BertAttention(nn.Module):
         return context_layer
     
 
-class BertForNextTokenPrediction(nn.Module):
+class MyBertForNextTokenPrediction(nn.Module):
 
     def __init__(self, base_bert_model, vocab_size):
         super().__init__()
@@ -154,14 +174,19 @@ def initialize_weights(module):
         init.constant_(module.weight, 1)
         init.constant_(module.bias, 0)
 
-def save_checkpoint(state, filename="checkpoint.pth.tar"):
-    epoch = state['epoch']
-    formatted_filename = f"{filename.split('.')[0]}_train_{epoch}.pth.tar"
-    torch.save(state, os.path.join('.', formatted_filename))
+def save_checkpoint(state, filename=checkpoint_name, directory='.'):
+    checkpoint_dir = os.path.join(directory, checkpoint_name)
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
 
-def load_latest_checkpoint(directory='.'):
-    pattern = 'checkpoint_train_*.pth.tar'
-    list_of_files = glob.glob(os.path.join(directory, pattern))
+    epoch = state['epoch']
+    formatted_filename = f"{filename}_{epoch}.pth.tar"
+    torch.save(state, os.path.join(checkpoint_dir, formatted_filename))
+
+def load_latest_checkpoint(checkpoint_name, directory='.'):
+    checkpoint_dir = os.path.join(directory, checkpoint_name)
+    pattern = f'{checkpoint_name}_*.pth.tar'
+    list_of_files = glob.glob(os.path.join(checkpoint_dir, pattern))
     if not list_of_files:
         return None
     latest_file = max(list_of_files, key=os.path.getctime)
@@ -174,7 +199,9 @@ def preprocess_function(examples):
     texts = [text[:max_length-1] + "[SEP]" for text in examples["text"]]
     return tokenizer(texts, padding="max_length", truncation=True, max_length=max_length, return_tensors="pt")
 
-
+def load_pretrained_weights(self, pretrained_model_path):
+    pretrained_state_dict = torch.load(pretrained_model_path, map_location=lambda storage, loc: storage)
+    self.load_state_dict(pretrained_state_dict, strict=False)
 
 def main():
 
@@ -192,20 +219,27 @@ def main():
     val_encoded_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask'])
     val_dataloader = DataLoader(val_encoded_dataset, batch_size=32, shuffle=False)        
 
-    base_bert_model = BertModel(vocab_size, hidden_size, num_hidden_layers, num_attention_heads, intermediate_size, max_position_embeddings).to(device)
+    base_bert_model = MyBertModel(vocab_size, hidden_size, num_hidden_layers, num_attention_heads, intermediate_size, max_position_embeddings).to(device)
 
-    model = BertForNextTokenPrediction(base_bert_model, vocab_size).to(device)
+    if use_pretrained_weights:
+        pretrained_bert = BertModel.from_pretrained("bert-base-uncased")
+        pretrained_state_dict = pretrained_bert.state_dict()
+        base_bert_model.load_pretrained_weights(pretrained_state_dict)
+    else:
+        base_bert_model.apply(initialize_weights)    
+
+    # model = MyBertForNextTokenPrediction(base_bert_model, vocab_size).to(device)
+    model = base_bert_model
     model.apply(initialize_weights)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
 
-    load_from_checkpoint = True
     start_epoch = 0
     best_val_loss = float('inf')
 
     # Optional checkpoint loading
     if load_from_checkpoint:
-        checkpoint = load_latest_checkpoint()
+        checkpoint = load_latest_checkpoint(checkpoint_name)
         if checkpoint:
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
@@ -253,14 +287,14 @@ def main():
                 val_loss_fn = nn.CrossEntropyLoss()
                 val_loss = val_loss_fn(val_outputs.reshape(-1, val_outputs.size(-1)), val_labels.reshape(-1))
 
-            val_total_loss += val_loss.item() * val_input_ids.size(0)
-            val_total_items += val_input_ids.size(0)            
+                val_total_loss += val_loss.item() * val_input_ids.size(0)
+                val_total_items += val_input_ids.size(0)            
 
         train_avg_loss = total_loss / len(train_dataloader)
         val_avg_loss = val_total_loss / val_total_items
         print(f"Epoch {epoch+1}, Training Avg Loss: {train_avg_loss:.2f}, Evaluation Ave Loss: {val_avg_loss:.2f}")
 
-        if (epoch + 1) % 5 == 0 or train_avg_loss < best_val_loss:
+        if epoch % checkpoint_frequency == 0:
             best_val_loss = min(train_avg_loss, best_val_loss)
             save_checkpoint({
                 'epoch': epoch + 1,

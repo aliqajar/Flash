@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from transformers import BertTokenizer, BertModel
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# device = 'cpu'
+print("Using device: ", device)
 
 tokenizer = BertTokenizer.from_pretrained('bert-base-multilingual-cased')
 bert_model = BertModel.from_pretrained('bert-base-multilingual-cased')
@@ -57,7 +57,7 @@ def train(model, dataloader, optimizer, criterion, num_epochs):
         print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
 
 num_epochs = 100
-train(model, dataloader, optimizer, criterion, num_epochs)
+# train(model, dataloader, optimizer, criterion, num_epochs)
 
 def evaluate(model, dataloader):
     model.eval()
