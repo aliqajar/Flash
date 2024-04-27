@@ -16,3 +16,8 @@ venv/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
+
+
+/results
+/.results
+/models
