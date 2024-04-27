@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from transformers import BertTokenizer, BertModel
+from transformers import BertTokenizer
 from datasets import load_dataset
 import math
 import torch.nn.init as init
@@ -12,7 +12,6 @@ import torch.nn.init as init
 checkpoint_name = "cp_bert"
 load_from_checkpoint = False
 checkpoint_frequency = 5
-use_pretrained_weights = True
 
 # Parameters
 vocab_size = 30522
@@ -41,7 +40,7 @@ num_epochs = 1000
 # num_epochs = 100    
 
 
-class MyBertModel(nn.Module):
+class BertModel(nn.Module):
 
     def __init__(
             self, 
@@ -57,10 +56,11 @@ class MyBertModel(nn.Module):
         self.embedding = nn.Embedding(vocab_size, hidden_size)
         self.position_embedding = nn.Embedding(max_position_embeddings, hidden_size)
         self.layers = nn.ModuleList([
-            MyBertLayer(hidden_size, num_attention_heads, intermediate_size)
+            BertLayer(hidden_size, num_attention_heads, intermediate_size)
             for _ in range(num_hidden_layers)
         ])
 
+    
     def forward(self, input_ids, attention_mask):
         seq_length = input_ids.size(1)
         position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
@@ -70,22 +70,14 @@ class MyBertModel(nn.Module):
             embeddings = layer(embeddings, attention_mask)
         return embeddings
     
-    def load_pretrained_weights(self, pretrained_model):
-        self_state_dict = self.state_dict()
-        for key, value in pretrained_model.items():
-            if key in self_state_dict and self_state_dict[key].shape == value.shape:
-                self_state_dict[key] = value
-        self.load_state_dict(self_state_dict, strict=False)
 
-    
-
-class MyBertLayer(nn.Module):
+class BertLayer(nn.Module):
 
     def __init__(self, hidden_size, num_attention_heads, intermediate_size):
 
         super().__init__()
 
-        self.attention = MyBertAttention(hidden_size, num_attention_heads)
+        self.attention = BertAttention(hidden_size, num_attention_heads)
         self.feed_forward = nn.Sequential(
             nn.Linear(hidden_size, intermediate_size),
             nn.GELU(),
@@ -104,7 +96,7 @@ class MyBertLayer(nn.Module):
         return layernorm_output
     
 
-class MyBertAttention(nn.Module):
+class BertAttention(nn.Module):
 
     def __init__(self, hidden_size, num_attention_heads):
         super().__init__()
@@ -148,7 +140,7 @@ class MyBertAttention(nn.Module):
         return context_layer
     
 
-class MyBertForNextTokenPrediction(nn.Module):
+class BertForNextTokenPrediction(nn.Module):
 
     def __init__(self, base_bert_model, vocab_size):
         super().__init__()
@@ -219,17 +211,9 @@ def main():
     val_encoded_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask'])
     val_dataloader = DataLoader(val_encoded_dataset, batch_size=32, shuffle=False)        
 
-    base_bert_model = MyBertModel(vocab_size, hidden_size, num_hidden_layers, num_attention_heads, intermediate_size, max_position_embeddings).to(device)
+    base_bert_model = BertModel(vocab_size, hidden_size, num_hidden_layers, num_attention_heads, intermediate_size, max_position_embeddings).to(device)
 
-    if use_pretrained_weights:
-        pretrained_bert = BertModel.from_pretrained("bert-base-uncased")
-        pretrained_state_dict = pretrained_bert.state_dict()
-        base_bert_model.load_pretrained_weights(pretrained_state_dict)
-    else:
-        base_bert_model.apply(initialize_weights)    
-
-    # model = MyBertForNextTokenPrediction(base_bert_model, vocab_size).to(device)
-    model = base_bert_model
+    model = BertForNextTokenPrediction(base_bert_model, vocab_size).to(device)
     model.apply(initialize_weights)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
